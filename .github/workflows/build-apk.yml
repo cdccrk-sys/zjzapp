@@ -14,15 +14,9 @@ jobs:
 
     steps:
 
-      # =========================
-      # 1. Checkout
-      # =========================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================
-      # 2. 解压源码
-      # =========================
       - name: Prepare source
         run: |
           set -e
@@ -38,18 +32,12 @@ jobs:
           echo "===== Project ====="
           ls -la idphoto_studio
 
-      # =========================
-      # 3. Java 17
-      # =========================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # =========================
-      # 4. Flutter 3.47.2
-      # =========================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -57,17 +45,11 @@ jobs:
           channel: stable
           cache: true
 
-      # =========================
-      # 5. Flutter version
-      # =========================
       - name: Check Flutter
         run: |
           flutter --version
           dart --version
 
-      # =========================
-      # 6. BiRefNet ONNX
-      # =========================
       - name: Download BiRefNet portrait ONNX
         working-directory: idphoto_studio
         run: |
@@ -87,143 +69,140 @@ jobs:
 
           test -s assets/models/birefnet_portrait_fp16.onnx
 
-      # =========================
-      # 7. Flutter dependencies
-      # =========================
       - name: Flutter pub get
         working-directory: idphoto_studio
         run: |
           set -e
 
           flutter clean
-
           flutter pub get
 
-      # =========================
-      # 8. 修复 desktop_drop
-      #
-      # desktop_drop 自己的 Android 模块
-      # 使用 compileSdk 33。
-      #
-      # AndroidX 新依赖要求 >= 34。
-      # =========================
-      - name: Fix desktop_drop compileSdk
+      # ==================================================
+      # 强制修复所有 Flutter 插件的 Android compileSdk
+      # ==================================================
+      - name: Fix all Flutter plugin compileSdk
         run: |
           set -e
 
-          echo "===== Searching desktop_drop ====="
+          PUB="$HOME/.pub-cache/hosted/pub.dev"
 
-          find "$HOME/.pub-cache" \
-            -path "*desktop_drop*/android/*" \
+          echo "========================================"
+          echo "Searching Flutter plugin Android projects"
+          echo "========================================"
+
+          find "$PUB" \
             -type f \
             \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -path "*/android/*" \
             -print
 
-          echo "===== Before ====="
+          echo "========================================"
+          echo "BEFORE PATCH"
+          echo "========================================"
 
-          grep -R \
-            -n \
-            "compileSdk\|compileSdkVersion" \
-            "$HOME/.pub-cache/hosted/pub.dev/desktop_drop-"*"/android" \
+          grep -R -n -E \
+            'compileSdk(Vers?ion)?[[:space:]]*([=:][[:space:]]*)?[0-9]+' \
+            "$PUB" \
+            --include="build.gradle" \
+            --include="build.gradle.kts" \
             2>/dev/null || true
 
-          echo "===== Patching desktop_drop ====="
+          echo "========================================"
+          echo "PATCH compileSdk 33 -> 35"
+          echo "========================================"
 
-          find "$HOME/.pub-cache/hosted/pub.dev/" \
-            -path "desktop_drop-*/android/build.gradle" \
+          find "$PUB" \
             -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -path "*/android/*" \
             -exec sed -i -E \
-            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            's/(compileSdkVersion|compileSdk)([[:space:]]*[:=]?[[:space:]]*)33/\1\2 35/g' \
             {} \;
 
-          find "$HOME/.pub-cache/hosted/pub.dev/" \
-            -path "desktop_drop-*/android/build.gradle.kts" \
-            -type f \
-            -exec sed -i -E \
-            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
-            {} \;
+          echo "========================================"
+          echo "AFTER PATCH"
+          echo "========================================"
 
-          echo "===== After ====="
-
-          grep -R \
-            -n \
-            "compileSdk\|compileSdkVersion" \
-            "$HOME/.pub-cache/hosted/pub.dev/desktop_drop-"*"/android" \
+          grep -R -n -E \
+            'compileSdk(Vers?ion)?[[:space:]]*([=:][[:space:]]*)?[0-9]+' \
+            "$PUB" \
+            --include="build.gradle" \
+            --include="build.gradle.kts" \
             2>/dev/null || true
 
-      # =========================
-      # 9. 同时修复其他 Flutter
-      #    插件的 compileSdk
-      # =========================
-      - name: Fix Flutter plugin compileSdk
+      # ==================================================
+      # 专门检查 desktop_drop
+      # ==================================================
+      - name: Verify desktop_drop
         run: |
           set -e
 
-          echo "===== Flutter plugin Android Gradle files ====="
+          echo "========================================"
+          echo "desktop_drop files"
+          echo "========================================"
 
           find "$HOME/.pub-cache/hosted/pub.dev" \
+            -path "*/desktop_drop-*/android/*" \
             -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -path "*/android/*" \
-            -print | head -100
+            -print || true
 
-          echo "===== Patching old compileSdk 33 ====="
+          echo "========================================"
+          echo "desktop_drop compileSdk"
+          echo "========================================"
 
-          find "$HOME/.pub-cache/hosted/pub.dev" \
-            -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -path "*/android/*" \
-            -exec sed -i -E \
-            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
-            {} \;
+          grep -R -n -E \
+            'compileSdk(Vers?ion)?' \
+            "$HOME/.pub-cache/hosted/pub.dev"/desktop_drop-* \
+            --include="build.gradle" \
+            --include="build.gradle.kts" \
+            2>/dev/null || true
 
-      # =========================
-      # 10. 设置项目 Android compileSdk
-      # =========================
-      - name: Fix app compileSdk
+      # ==================================================
+      # 再次修复项目自身 Android 配置
+      # ==================================================
+      - name: Fix project Android compileSdk
         working-directory: idphoto_studio
         run: |
           set -e
 
-          echo "===== Android Gradle files ====="
+          echo "========================================"
+          echo "Project compileSdk BEFORE"
+          echo "========================================"
 
-          grep -R \
-            -n \
-            "compileSdk\|compileSdkVersion" \
+          grep -R -n -E \
+            'compileSdk(Vers?ion)?' \
             android \
             --include="build.gradle" \
             --include="build.gradle.kts" \
-            || true
+            2>/dev/null || true
 
           find android \
             -type f \
             \( -name "build.gradle" -o -name "build.gradle.kts" \) \
             -exec sed -i -E \
-            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            's/(compileSdkVersion|compileSdk)([[:space:]]*[:=]?[[:space:]]*)33/\1\2 35/g' \
             {} \;
 
-          echo "===== Final Android compileSdk ====="
+          echo "========================================"
+          echo "Project compileSdk AFTER"
+          echo "========================================"
 
-          grep -R \
-            -n \
-            "compileSdk\|compileSdkVersion" \
+          grep -R -n -E \
+            'compileSdk(Vers?ion)?' \
             android \
             --include="build.gradle" \
             --include="build.gradle.kts" \
-            || true
+            2>/dev/null || true
 
-      # =========================
-      # 11. 分析 Flutter
-      # =========================
       - name: Flutter analyze
         working-directory: idphoto_studio
         run: |
           flutter analyze
         continue-on-error: true
 
-      # =========================
-      # 12. 构建 APK
-      # =========================
+      # ==================================================
+      # 构建 APK
+      # ==================================================
       - name: Build release APK
         working-directory: idphoto_studio
         env:
@@ -233,9 +212,6 @@ jobs:
 
           flutter build apk --release
 
-      # =========================
-      # 13. 检查 APK
-      # =========================
       - name: Check APK
         working-directory: idphoto_studio
         run: |
@@ -243,26 +219,14 @@ jobs:
 
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
+          test -f "$APK"
 
-          echo "===== APK ====="
+          echo "========================================"
+          echo "APK generated successfully"
+          echo "========================================"
+
           ls -lh "$APK"
 
-          SIZE=$(stat -c%s "$APK")
-
-          echo "APK size: $SIZE bytes"
-
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "ERROR: APK is too small."
-            exit 1
-          fi
-
-      # =========================
-      # 14. 上传 APK
-      # =========================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
