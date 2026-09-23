@@ -13,15 +13,16 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      # ==============================
-      # 1. 获取源码
-      # ==============================
+
+      # =========================
+      # 1. Checkout
+      # =========================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ==============================
-      # 2. 解压 Flutter 项目
-      # ==============================
+      # =========================
+      # 2. 解压源码
+      # =========================
       - name: Prepare source
         run: |
           set -e
@@ -34,24 +35,21 @@ jobs:
 
           test -f idphoto_studio/pubspec.yaml
 
-          echo "===== Flutter project ====="
+          echo "===== Project ====="
           ls -la idphoto_studio
 
-          echo "===== Android directory ====="
-          ls -la idphoto_studio/android
-
-      # ==============================
+      # =========================
       # 3. Java 17
-      # ==============================
+      # =========================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # ==============================
+      # =========================
       # 4. Flutter 3.47.2
-      # ==============================
+      # =========================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -59,75 +57,23 @@ jobs:
           channel: stable
           cache: true
 
-      # ==============================
-      # 5. 显示 Flutter / Dart 版本
-      # ==============================
+      # =========================
+      # 5. Flutter version
+      # =========================
       - name: Check Flutter
         run: |
           flutter --version
           dart --version
 
-      # ==============================
-      # 6. 修复 Android compileSdk
-      #
-      # 部分依赖要求 compileSdk >= 34
-      # 这里统一提高到 35
-      # ==============================
-      - name: Update Android compileSdk
-        working-directory: idphoto_studio
-        run: |
-          set -e
-
-          echo "===== Before modification ====="
-          grep -R "compileSdk" android \
-            --include="build.gradle" \
-            --include="build.gradle.kts" \
-            || true
-
-          find android -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -print0 |
-          xargs -0 sed -i -E \
-            's/(compileSdk[[:space:]]+|compileSdkVersion[[:space:]]+)[0-9]+/\1 35/g'
-
-          echo "===== After modification ====="
-          grep -R "compileSdk" android \
-            --include="build.gradle" \
-            --include="build.gradle.kts" \
-            || true
-
-      # ==============================
-      # 7. 检查 Android Gradle 文件
-      # ==============================
-      - name: Check Android configuration
-        working-directory: idphoto_studio
-        run: |
-          echo "===== android/build.gradle ====="
-          if [ -f android/build.gradle ]; then
-            cat android/build.gradle
-          fi
-
-          echo "===== android/app/build.gradle ====="
-          if [ -f android/app/build.gradle ]; then
-            cat android/app/build.gradle
-          fi
-
-          echo "===== android/settings.gradle ====="
-          if [ -f android/settings.gradle ]; then
-            cat android/settings.gradle
-          fi
-
-      # ==============================
-      # 8. 下载 BiRefNet Portrait ONNX
-      # ==============================
+      # =========================
+      # 6. BiRefNet ONNX
+      # =========================
       - name: Download BiRefNet portrait ONNX
         working-directory: idphoto_studio
         run: |
           set -e
 
           mkdir -p assets/models
-
-          echo "Downloading BiRefNet Portrait FP16..."
 
           curl -L \
             --fail \
@@ -137,68 +83,147 @@ jobs:
             -o assets/models/birefnet_portrait_fp16.onnx \
             "https://huggingface.co/onnx-community/BiRefNet-portrait-ONNX/resolve/main/onnx/model_fp16.onnx?download=true"
 
-          echo "===== Model information ====="
           ls -lh assets/models/birefnet_portrait_fp16.onnx
 
           test -s assets/models/birefnet_portrait_fp16.onnx
 
-      # ==============================
-      # 9. 检查模型
-      # ==============================
-      - name: Check BiRefNet model
-        working-directory: idphoto_studio
-        run: |
-          set -e
-
-          MODEL="assets/models/birefnet_portrait_fp16.onnx"
-
-          if [ ! -f "$MODEL" ]; then
-            echo "ERROR: BiRefNet model not found"
-            exit 1
-          fi
-
-          SIZE=$(stat -c%s "$MODEL")
-
-          echo "BiRefNet model size: $SIZE bytes"
-
-          if [ "$SIZE" -lt 100000000 ]; then
-            echo "ERROR: Model file looks too small"
-            exit 1
-          fi
-
-          echo "BiRefNet model exists."
-
-      # ==============================
-      # 10. Flutter 依赖
-      # ==============================
+      # =========================
+      # 7. Flutter dependencies
+      # =========================
       - name: Flutter pub get
         working-directory: idphoto_studio
         run: |
           set -e
 
           flutter clean
+
           flutter pub get
 
-      # ==============================
-      # 11. 显示 Flutter 包信息
-      # ==============================
-      - name: Flutter packages
+      # =========================
+      # 8. 修复 desktop_drop
+      #
+      # desktop_drop 自己的 Android 模块
+      # 使用 compileSdk 33。
+      #
+      # AndroidX 新依赖要求 >= 34。
+      # =========================
+      - name: Fix desktop_drop compileSdk
+        run: |
+          set -e
+
+          echo "===== Searching desktop_drop ====="
+
+          find "$HOME/.pub-cache" \
+            -path "*desktop_drop*/android/*" \
+            -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -print
+
+          echo "===== Before ====="
+
+          grep -R \
+            -n \
+            "compileSdk\|compileSdkVersion" \
+            "$HOME/.pub-cache/hosted/pub.dev/desktop_drop-"*"/android" \
+            2>/dev/null || true
+
+          echo "===== Patching desktop_drop ====="
+
+          find "$HOME/.pub-cache/hosted/pub.dev/" \
+            -path "desktop_drop-*/android/build.gradle" \
+            -type f \
+            -exec sed -i -E \
+            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            {} \;
+
+          find "$HOME/.pub-cache/hosted/pub.dev/" \
+            -path "desktop_drop-*/android/build.gradle.kts" \
+            -type f \
+            -exec sed -i -E \
+            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            {} \;
+
+          echo "===== After ====="
+
+          grep -R \
+            -n \
+            "compileSdk\|compileSdkVersion" \
+            "$HOME/.pub-cache/hosted/pub.dev/desktop_drop-"*"/android" \
+            2>/dev/null || true
+
+      # =========================
+      # 9. 同时修复其他 Flutter
+      #    插件的 compileSdk
+      # =========================
+      - name: Fix Flutter plugin compileSdk
+        run: |
+          set -e
+
+          echo "===== Flutter plugin Android Gradle files ====="
+
+          find "$HOME/.pub-cache/hosted/pub.dev" \
+            -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -path "*/android/*" \
+            -print | head -100
+
+          echo "===== Patching old compileSdk 33 ====="
+
+          find "$HOME/.pub-cache/hosted/pub.dev" \
+            -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -path "*/android/*" \
+            -exec sed -i -E \
+            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            {} \;
+
+      # =========================
+      # 10. 设置项目 Android compileSdk
+      # =========================
+      - name: Fix app compileSdk
         working-directory: idphoto_studio
         run: |
-          flutter pub deps
+          set -e
 
-      # ==============================
-      # 12. 分析 Dart
-      # ==============================
+          echo "===== Android Gradle files ====="
+
+          grep -R \
+            -n \
+            "compileSdk\|compileSdkVersion" \
+            android \
+            --include="build.gradle" \
+            --include="build.gradle.kts" \
+            || true
+
+          find android \
+            -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -exec sed -i -E \
+            's/(compileSdkVersion[[:space:]]+|compileSdk[[:space:]]*[=:][[:space:]]*)33/\1 35/g' \
+            {} \;
+
+          echo "===== Final Android compileSdk ====="
+
+          grep -R \
+            -n \
+            "compileSdk\|compileSdkVersion" \
+            android \
+            --include="build.gradle" \
+            --include="build.gradle.kts" \
+            || true
+
+      # =========================
+      # 11. 分析 Flutter
+      # =========================
       - name: Flutter analyze
         working-directory: idphoto_studio
         run: |
           flutter analyze
         continue-on-error: true
 
-      # ==============================
-      # 13. 构建 Release APK
-      # ==============================
+      # =========================
+      # 12. 构建 APK
+      # =========================
       - name: Build release APK
         working-directory: idphoto_studio
         env:
@@ -208,9 +233,9 @@ jobs:
 
           flutter build apk --release
 
-      # ==============================
-      # 14. 检查 APK
-      # ==============================
+      # =========================
+      # 13. 检查 APK
+      # =========================
       - name: Check APK
         working-directory: idphoto_studio
         run: |
@@ -231,13 +256,13 @@ jobs:
           echo "APK size: $SIZE bytes"
 
           if [ "$SIZE" -lt 1000000 ]; then
-            echo "ERROR: APK looks too small."
+            echo "ERROR: APK is too small."
             exit 1
           fi
 
-      # ==============================
-      # 15. 上传 APK
-      # ==============================
+      # =========================
+      # 14. 上传 APK
+      # =========================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
